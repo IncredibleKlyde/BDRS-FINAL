@@ -44,7 +44,7 @@ public class Officials {
                     approveDocumentRequests(sc);
                     break;
                 case 7:
-                    disableAccount(sc);
+                    manageAccountStatus(sc);
                     break;
                 case 8:
                     documentPanel(sc);
@@ -64,118 +64,122 @@ public class Officials {
     private void registerUser(Scanner sc) {
         String uname, ufullname, upass, contact, utype;
 
-        try (Connection conn = connectDB()) {
-            // Validate Username (must be unique)
-            while (true) {
-                System.out.print("Enter Username (Login name): ");
-                uname = sc.nextLine();
+        // STEP 1: Validate Username (separate connection)
+        while (true) {
+            System.out.print("Enter Username (Login name): ");
+            uname = sc.nextLine();
 
-                PreparedStatement checkUser = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_name = ?");
+            try (Connection conn = connectDB();
+                 PreparedStatement checkUser = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_name = ?")) {
+
                 checkUser.setString(1, uname);
                 ResultSet rsUser = checkUser.executeQuery();
 
-                boolean exists = false;
-                if (rsUser.next() && rsUser.getInt(1) > 0) {
-                    exists = true;
-                }
-
+                boolean exists = rsUser.next() && rsUser.getInt(1) > 0;
                 rsUser.close();
-                checkUser.close();
 
                 if (exists) {
                     System.out.println("❌ Username already exists! Please try another.\n");
                     continue;
                 }
                 break;
+            } catch (SQLException e) {
+                System.out.println("❌ Error checking username: " + e.getMessage());
+                return;
             }
+        }
 
-            // Validate Full Name (must be unique)
-            while (true) {
-                System.out.print("Enter Full Name: ");
-                ufullname = sc.nextLine();
+        // STEP 2: Validate Full Name (separate connection)
+        while (true) {
+            System.out.print("Enter Full Name: ");
+            ufullname = sc.nextLine();
 
-                PreparedStatement checkFull = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_fullname = ?");
+            try (Connection conn = connectDB();
+                 PreparedStatement checkFull = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_fullname = ?")) {
+
                 checkFull.setString(1, ufullname);
                 ResultSet rsFull = checkFull.executeQuery();
 
-                boolean fullExists = false;
-                if (rsFull.next() && rsFull.getInt(1) > 0) {
-                    fullExists = true;
-                }
-
+                boolean fullExists = rsFull.next() && rsFull.getInt(1) > 0;
                 rsFull.close();
-                checkFull.close();
 
                 if (fullExists) {
                     System.out.println("❌ Full Name already exists! Please try another.\n");
                     continue;
                 }
                 break;
+            } catch (SQLException e) {
+                System.out.println("❌ Error checking full name: " + e.getMessage());
+                return;
+            }
+        }
+
+        // STEP 3: Get Password and hash it
+        System.out.print("Enter Password: ");
+        upass = sc.nextLine();
+        String hashedPassword = db.hashPassword(upass);  // Hash the password
+
+        // STEP 4: Validate Contact Number (separate connection)
+        while (true) {
+            System.out.print("Enter Contact Number: ");
+            contact = sc.nextLine();
+
+            if (!contact.matches("\\d{11}")) {
+                System.out.println("❌ Invalid contact number! It must contain exactly 11 digits.\n");
+                continue;
             }
 
-            // Enter Password
-            System.out.print("Enter Password: ");
-            upass = sc.nextLine();
+            try (Connection conn = connectDB();
+                 PreparedStatement checkContact = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_contact = ?")) {
 
-            // Validate Contact Number (unique + 11 digits)
-            while (true) {
-                System.out.print("Enter Contact Number: ");
-                contact = sc.nextLine();
-
-                if (!contact.matches("\\d{11}")) {
-                    System.out.println("❌ Invalid contact number! It must contain exactly 11 digits.\n");
-                    continue;
-                }
-
-                PreparedStatement checkContact = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_contact = ?");
                 checkContact.setString(1, contact);
                 ResultSet rsContact = checkContact.executeQuery();
 
-                boolean contactExists = false;
-                if (rsContact.next() && rsContact.getInt(1) > 0) {
-                    contactExists = true;
-                }
-
+                boolean contactExists = rsContact.next() && rsContact.getInt(1) > 0;
                 rsContact.close();
-                checkContact.close();
 
                 if (contactExists) {
                     System.out.println("❌ Contact number already exists! Please try another.\n");
                     continue;
                 }
                 break;
+            } catch (SQLException e) {
+                System.out.println("❌ Error checking contact: " + e.getMessage());
+                return;
             }
+        }
 
-            // Ask for User Type (Official or Resident only)
-            while (true) {
-                System.out.print("What user type are you? (Official or Resident): ");
-                utype = sc.nextLine().trim();
+        // STEP 5: Get User Type (no database)
+        while (true) {
+            System.out.print("What user type are you? (Official or Resident): ");
+            utype = sc.nextLine().trim();
 
-                if (utype.equalsIgnoreCase("Official") || utype.equalsIgnoreCase("Resident")) {
-                    break;
-                } else {
-                    System.out.println("❌ Only choose 'Official' or 'Resident'.\n");
-                }
+            if (utype.equalsIgnoreCase("Official") || utype.equalsIgnoreCase("Resident")) {
+                break;
+            } else {
+                System.out.println("❌ Only choose 'Official' or 'Resident'.\n");
             }
+        }
 
-            // Insert record safely
-            String addSql = "INSERT INTO tbl_user (u_name, u_fullname, u_password, u_contact, u_role) VALUES (?, ?, ?, ?, ?)";
-            PreparedStatement addStmt = conn.prepareStatement(addSql);
+        // STEP 6: Insert record with HASHED password and PENDING status
+        try (Connection conn = connectDB();
+             PreparedStatement addStmt = conn.prepareStatement(
+                     "INSERT INTO tbl_user (u_name, u_fullname, u_password, u_contact, u_role, u_status) VALUES (?, ?, ?, ?, ?, 'Pending')")) {
+
             addStmt.setString(1, uname);
             addStmt.setString(2, ufullname);
-            addStmt.setString(3, upass);
+            addStmt.setString(3, hashedPassword);  // Store HASHED password
             addStmt.setString(4, contact);
             addStmt.setString(5, utype);
             addStmt.executeUpdate();
-            addStmt.close();
 
-            System.out.println("✅ User registered successfully!");
+            System.out.println("✅ User registered successfully! Status: Pending - awaiting approval.");
 
         } catch (SQLException e) {
-            System.out.println("Error checking duplicates: " + e.getMessage());
+            System.out.println("❌ Error inserting user: " + e.getMessage());
         }
     }
 
@@ -193,23 +197,18 @@ public class Officials {
             uid = sc.nextInt();
             sc.nextLine();
 
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkStmt = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_id = ?"
-                );
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_id = ?")) {
+                
                 checkStmt.setInt(1, uid);
                 ResultSet rs = checkStmt.executeQuery();
                 rs.next();
 
                 if (rs.getInt(1) == 0) {
                     System.out.println("❌ ID not found! Please enter a valid ID.\n");
-                    rs.close();
-                    checkStmt.close();
                     continue;
                 }
-
-                rs.close();
-                checkStmt.close();
                 break;
 
             } catch (SQLException e) {
@@ -218,27 +217,26 @@ public class Officials {
             }
         }
 
-        String newName, newFullName, newType, newContact;
+        String newName, newFullName, newPassword, newContact;
 
         // Check for duplicate Username
         while (true) {
             System.out.print("Enter new Username (Login name): ");
             newName = sc.nextLine();
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkStmt = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_name = ? AND u_id != ?");
+            
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_name = ? AND u_id != ?")) {
+                
                 checkStmt.setString(1, newName);
                 checkStmt.setInt(2, uid);
                 ResultSet rs = checkStmt.executeQuery();
                 rs.next();
+                
                 if (rs.getInt(1) > 0) {
-                    System.out.println("Username already exists! Please try another one.\n");
-                    rs.close();
-                    checkStmt.close();
+                    System.out.println("❌ Username already exists! Please try another one.\n");
                     continue;
                 }
-                rs.close();
-                checkStmt.close();
                 break;
             } catch (SQLException e) {
                 System.out.println("Error checking username: " + e.getMessage());
@@ -250,21 +248,20 @@ public class Officials {
         while (true) {
             System.out.print("Enter new Full Name: ");
             newFullName = sc.nextLine();
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkStmt = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_fullname = ? AND u_id != ?");
+            
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_fullname = ? AND u_id != ?")) {
+                
                 checkStmt.setString(1, newFullName);
                 checkStmt.setInt(2, uid);
                 ResultSet rs = checkStmt.executeQuery();
                 rs.next();
+                
                 if (rs.getInt(1) > 0) {
-                    System.out.println("Full Name already exists! Please try another one.\n");
-                    rs.close();
-                    checkStmt.close();
+                    System.out.println("❌ Full Name already exists! Please try another one.\n");
                     continue;
                 }
-                rs.close();
-                checkStmt.close();
                 break;
             } catch (SQLException e) {
                 System.out.println("Error checking full name: " + e.getMessage());
@@ -272,29 +269,28 @@ public class Officials {
             }
         }
 
+        // Get password (no database)
         System.out.print("Enter new password: ");
-        newType = sc.nextLine();
+        newPassword = sc.nextLine();
 
         // Check for duplicate Contact Number
         while (true) {
             System.out.print("Enter new contact number: ");
             newContact = sc.nextLine();
 
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkStmt = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_contact = ? AND u_id != ?");
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_contact = ? AND u_id != ?")) {
+                
                 checkStmt.setString(1, newContact);
                 checkStmt.setInt(2, uid);
                 ResultSet rs = checkStmt.executeQuery();
                 rs.next();
+                
                 if (rs.getInt(1) > 0) {
-                    System.out.println("Contact number already exists! Please try another one.\n");
-                    rs.close();
-                    checkStmt.close();
+                    System.out.println("❌ Contact number already exists! Please try another one.\n");
                     continue;
                 }
-                rs.close();
-                checkStmt.close();
                 break;
             } catch (SQLException e) {
                 System.out.println("Error checking contact number: " + e.getMessage());
@@ -304,7 +300,7 @@ public class Officials {
 
         // Proceed with update if all checks pass
         String updateSql = "UPDATE tbl_user SET u_name = ?, u_fullname = ?, u_password = ?, u_contact = ? WHERE u_id = ?";
-        db.updateRecord(updateSql, newName, newFullName, newType, newContact, uid);
+        db.updateRecord(updateSql, newName, newFullName, newPassword, newContact, uid);
         System.out.println("✅ User information updated successfully!");
     }
 
@@ -329,24 +325,20 @@ public class Officials {
             delId = sc.nextInt();
             sc.nextLine();
 
-            try {
-                PreparedStatement checkStmt = connectDB().prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_id = ?"
-                );
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_id = ?")) {
+                
                 checkStmt.setInt(1, delId);
                 ResultSet rs = checkStmt.executeQuery();
                 rs.next();
 
                 if (rs.getInt(1) == 0) {
                     System.out.println("❌ ID not found! Please enter a valid ID.\n");
-                    rs.close();
-                    checkStmt.close();
                     continue;
                 }
-
-                rs.close();
-                checkStmt.close();
                 break;
+                
             } catch (SQLException e) {
                 System.out.println("Error checking ID: " + e.getMessage());
                 return;
@@ -371,23 +363,18 @@ public class Officials {
             id = sc.nextInt();
             sc.nextLine();
 
-            try {
-                PreparedStatement checkStmt = connectDB().prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_id = ? AND u_status = 'Pending'"
-                );
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_id = ? AND u_status = 'Pending'")) {
+                
                 checkStmt.setInt(1, id);
                 ResultSet rs = checkStmt.executeQuery();
                 rs.next();
 
                 if (rs.getInt(1) == 0) {
                     System.out.println("❌ ID not found in pending list! Please enter a valid ID.\n");
-                    rs.close();
-                    checkStmt.close();
                     continue;
                 }
-
-                rs.close();
-                checkStmt.close();
                 break;
 
             } catch (SQLException e) {
@@ -400,14 +387,18 @@ public class Officials {
         String decision = sc.nextLine().trim();
         String update = "UPDATE tbl_user SET u_status = ? WHERE u_id = ?";
         String status = null;
+        
         if (decision.equalsIgnoreCase("A")) {
             status = "Approved";
         } else if (decision.equalsIgnoreCase("D")) {
             status = "Denied";
         } else {
             System.out.println("Invalid choice.");
+            return;
         }
+        
         db.updateRecord(update, status, id);
+        System.out.println("✅ Registration " + status.toLowerCase() + " successfully!");
     }
 
     private void approveDocumentRequests(Scanner sc) {
@@ -431,10 +422,10 @@ public class Officials {
             rid = sc.nextInt();
             sc.nextLine();
 
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkStmt = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_req WHERE r_id = ? AND r_status = 'Pending'"
-                );
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_req WHERE r_id = ? AND r_status = 'Pending'")) {
+                
                 checkStmt.setInt(1, rid);
                 ResultSet rs = checkStmt.executeQuery();
                 rs.next();
@@ -453,7 +444,7 @@ public class Officials {
         System.out.print("Approve or Deny? (A/D): ");
         String decisionDoc = sc.nextLine().trim();
 
-        String statusDoc = null;
+        String statusDoc;
         if (decisionDoc.equalsIgnoreCase("A")) {
             statusDoc = "Approved";
         } else if (decisionDoc.equalsIgnoreCase("D")) {
@@ -472,40 +463,37 @@ public class Officials {
         System.out.println("✅ Document request " + statusDoc.toLowerCase() + " successfully!");
     }
 
-    private void disableAccount(Scanner sc) {
-        System.out.println("\n==== Disable Account ====");
+    private void manageAccountStatus(Scanner sc) {
+        System.out.println("\n==== Manage Account Status ====");
 
-        // Show all active or approved users
-        String disableSql = "SELECT u_id, u_name, u_fullname, u_contact, u_status FROM tbl_user WHERE u_status = 'Approved'";
-        String[] disableHeaders = {"ID", "Username", "Full Name", "Contact", "Status"};
-        String[] disableCols = {"u_id", "u_name", "u_fullname", "u_contact", "u_status"};
-        db.viewRecords(disableSql, disableHeaders, disableCols);
+        // Show users with status Approved or Disabled
+        String sql = "SELECT u_id, u_name, u_fullname, u_contact, u_status FROM tbl_user WHERE u_status IN ('Approved','Disabled')";
+        String[] headers = {"ID", "Username", "Full Name", "Contact", "Status"};
+        String[] cols = {"u_id", "u_name", "u_fullname", "u_contact", "u_status"};
+        db.viewRecords(sql, headers, cols);
 
-        int disableId;
+        int userId;
+        String currentStatus = null;
 
-        // Validation loop to ensure user exists and is not already disabled
+        // Get user ID and status
         while (true) {
-            System.out.print("Enter User ID to disable: ");
-            disableId = sc.nextInt();
+            System.out.print("Enter User ID to modify: ");
+            userId = sc.nextInt();
             sc.nextLine();
 
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkStmt = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_id = ? AND u_status = 'Approved'"
-                );
-                checkStmt.setInt(1, disableId);
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT u_status FROM tbl_user WHERE u_id = ?")) {
+                
+                checkStmt.setInt(1, userId);
                 ResultSet rs = checkStmt.executeQuery();
-                rs.next();
 
-                if (rs.getInt(1) == 0) {
-                    System.out.println("❌ ID not found or already disabled! Please enter a valid ID.\n");
-                    rs.close();
-                    checkStmt.close();
+                if (!rs.next()) {
+                    System.out.println("❌ User not found! Try again.\n");
                     continue;
                 }
 
-                rs.close();
-                checkStmt.close();
+                currentStatus = rs.getString("u_status");
                 break;
 
             } catch (SQLException e) {
@@ -514,16 +502,29 @@ public class Officials {
             }
         }
 
-        // Confirm disable action
-        System.out.print("Are you sure you want to disable this account? (Y/N): ");
-        String confirm = sc.nextLine().trim();
+        // Display status and get action
+        System.out.println("Current Status: " + currentStatus);
+        System.out.print("Do you want to (D)isable or (E)nable this account? ");
+        String action = sc.nextLine().trim();
 
-        if (confirm.equalsIgnoreCase("Y")) {
-            String disableUpdate = "UPDATE tbl_user SET u_status = 'Disabled' WHERE u_id = ?";
-            db.updateRecord(disableUpdate, disableId);
+        String newStatus = null;
+        if (action.equalsIgnoreCase("D") && currentStatus.equals("Approved")) {
+            newStatus = "Disabled";
+        } else if (action.equalsIgnoreCase("E") && currentStatus.equals("Disabled")) {
+            newStatus = "Approved";
+        } else {
+            System.out.println("⚠ Invalid action or status already set.");
+            return;
+        }
+
+        // Update status
+        String updateSQL = "UPDATE tbl_user SET u_status = ? WHERE u_id = ?";
+        db.updateRecord(updateSQL, newStatus, userId);
+        
+        if (newStatus.equals("Disabled")) {
             System.out.println("✅ Account disabled successfully!");
         } else {
-            System.out.println("❌ Disable action cancelled.");
+            System.out.println("🟢 Account enabled successfully!");
         }
     }
 
@@ -572,26 +573,30 @@ public class Officials {
         sc.nextLine();
 
         try (Connection conn = connectDB();
-                PreparedStatement pstmt = conn.prepareStatement(
-                        "INSERT INTO tbl_doc (d_doctype, d_fee, d_status) VALUES (?, ?, 'Available')")) {
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "INSERT INTO tbl_doc (d_doctype, d_fee, d_status) VALUES (?, ?, 'Available')")) {
 
             pstmt.setString(1, docType);
             pstmt.setInt(2, fee);
             pstmt.executeUpdate();
             System.out.println("✅ Document added successfully!");
+            
         } catch (SQLException e) {
             System.out.println("❌ Error adding document: " + e.getMessage());
         }
     }
 
     private void updateDocument(Scanner sc) {
-        try (Connection conn = connectDB()) {
-            // Display all documents first
-            System.out.println("\n==== List of Documents ====");
-            PreparedStatement viewStmt = conn.prepareStatement("SELECT d_id, d_doctype, d_fee, d_status FROM tbl_doc");
-            ResultSet rsView = viewStmt.executeQuery();
+        System.out.println("\n==== List of Documents ====");
+        
+        int updateId;
+        boolean hasDocs = false;
+        
+        // STEP 1: Display documents and close connection
+        try (Connection conn = connectDB();
+             PreparedStatement viewStmt = conn.prepareStatement("SELECT d_id, d_doctype, d_fee, d_status FROM tbl_doc");
+             ResultSet rsView = viewStmt.executeQuery()) {
 
-            boolean hasDocs = false;
             while (rsView.next()) {
                 hasDocs = true;
                 System.out.printf("[%d] %-25s ₱%-5d  (%s)\n",
@@ -600,21 +605,25 @@ public class Officials {
                         rsView.getInt("d_fee"),
                         rsView.getString("d_status"));
             }
-            rsView.close();
-            viewStmt.close();
 
             if (!hasDocs) {
                 System.out.println("⚠️  No documents found to update.");
                 return;
             }
 
-            // Ask which document to update
-            System.out.print("\nEnter the document ID to update: ");
-            int updateId = sc.nextInt();
-            sc.nextLine();
+        } catch (SQLException e) {
+            System.out.println("❌ Error viewing documents: " + e.getMessage());
+            return;
+        }
 
-            // Check if document exists
-            PreparedStatement checkStmt = conn.prepareStatement("SELECT * FROM tbl_doc WHERE d_id = ?");
+        // STEP 2: Get document ID and validate
+        System.out.print("\nEnter the document ID to update: ");
+        updateId = sc.nextInt();
+        sc.nextLine();
+
+        try (Connection conn = connectDB();
+             PreparedStatement checkStmt = conn.prepareStatement("SELECT * FROM tbl_doc WHERE d_id = ?")) {
+            
             checkStmt.setInt(1, updateId);
             ResultSet rs = checkStmt.executeQuery();
 
@@ -623,18 +632,25 @@ public class Officials {
                 return;
             }
 
-            // Ask for new details
-            System.out.print("Enter new document name/type: ");
-            String newwType = sc.nextLine();
+        } catch (SQLException e) {
+            System.out.println("❌ Error checking document: " + e.getMessage());
+            return;
+        }
 
-            System.out.print("Enter new fee for that document: ");
-            int newFee = sc.nextInt();
-            sc.nextLine();
+        // STEP 3: Get new details (no database)
+        System.out.print("Enter new document name/type: ");
+        String newType = sc.nextLine();
 
-            // Update document details
-            PreparedStatement updateStmt = conn.prepareStatement(
-                    "UPDATE tbl_doc SET d_doctype = ?, d_fee = ? WHERE d_id = ?");
-            updateStmt.setString(1, newwType);
+        System.out.print("Enter new fee for that document: ");
+        int newFee = sc.nextInt();
+        sc.nextLine();
+
+        // STEP 4: Update document
+        try (Connection conn = connectDB();
+             PreparedStatement updateStmt = conn.prepareStatement(
+                     "UPDATE tbl_doc SET d_doctype = ?, d_fee = ? WHERE d_id = ?")) {
+            
+            updateStmt.setString(1, newType);
             updateStmt.setInt(2, newFee);
             updateStmt.setInt(3, updateId);
             updateStmt.executeUpdate();
@@ -648,8 +664,8 @@ public class Officials {
 
     private void viewDocuments() {
         try (Connection conn = connectDB();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM tbl_doc");
-                ResultSet rs = stmt.executeQuery()) {
+             PreparedStatement stmt = conn.prepareStatement("SELECT * FROM tbl_doc");
+             ResultSet rs = stmt.executeQuery()) {
 
             System.out.println("\n📜 Available Documents:");
             System.out.println("ID | Type | Fee | Status");
@@ -669,13 +685,17 @@ public class Officials {
     }
 
     private void toggleDocument(Scanner sc) {
-        try (Connection conn = connectDB();
-                PreparedStatement stmt = conn.prepareStatement("SELECT * FROM tbl_doc");
-                ResultSet rs = stmt.executeQuery()) {
+        System.out.println("\n📜 Document List:");
+        System.out.println("ID | Type | Fee | Status");
+        System.out.println("----------------------------------");
 
-            System.out.println("\n📜 Document List:");
-            System.out.println("ID | Type | Fee | Status");
-            System.out.println("----------------------------------");
+        int docId;
+        String currentStatus = null;
+        
+        // STEP 1: Display documents
+        try (Connection conn = connectDB();
+             PreparedStatement stmt = conn.prepareStatement("SELECT * FROM tbl_doc");
+             ResultSet rs = stmt.executeQuery()) {
 
             while (rs.next()) {
                 System.out.printf("%d | %s | %d | %s%n",
@@ -685,66 +705,81 @@ public class Officials {
                         rs.getString("d_status"));
             }
 
-            rs.close();
-            stmt.close();
+        } catch (SQLException e) {
+            System.out.println("❌ Error viewing documents: " + e.getMessage());
+            return;
+        }
 
-            System.out.print("\nEnter document ID to modify: ");
-            int docId = sc.nextInt();
-            sc.nextLine();
+        // STEP 2: Get document ID
+        System.out.print("\nEnter document ID to modify: ");
+        docId = sc.nextInt();
+        sc.nextLine();
 
-            // Check current status
-            PreparedStatement checkStmt = conn.prepareStatement("SELECT d_status FROM tbl_doc WHERE d_id = ?");
+        // STEP 3: Check current status
+        try (Connection conn = connectDB();
+             PreparedStatement checkStmt = conn.prepareStatement("SELECT d_status FROM tbl_doc WHERE d_id = ?")) {
+            
             checkStmt.setInt(1, docId);
             ResultSet checkRs = checkStmt.executeQuery();
 
             if (!checkRs.next()) {
                 System.out.println("❌ Document ID not found!");
-                checkRs.close();
-                checkStmt.close();
                 return;
             }
 
-            String currentStatus = checkRs.getString("d_status");
-            checkRs.close();
-            checkStmt.close();
+            currentStatus = checkRs.getString("d_status");
 
-            // Determine what to do next
-            if (currentStatus.equalsIgnoreCase("Available")) {
-                System.out.print("This document is currently AVAILABLE. Do you want to disable it? (Y/N): ");
-                String choicee = sc.nextLine();
+        } catch (SQLException e) {
+            System.out.println("❌ Error checking document: " + e.getMessage());
+            return;
+        }
 
-                if (choicee.equalsIgnoreCase("Y")) {
-                    PreparedStatement disableStmt = conn.prepareStatement(
-                            "UPDATE tbl_doc SET d_status = 'Disabled' WHERE d_id = ?");
-                    disableStmt.setInt(1, docId);
-                    disableStmt.executeUpdate();
-                    disableStmt.close();
-                    System.out.println("✅ Document has been DISABLED.");
-                } else {
-                    System.out.println("⚙️ Action cancelled.");
-                }
+        // STEP 4: Get user choice (no database)
+        String choice;
+        String newStatus;
+        
+        if (currentStatus.equalsIgnoreCase("Available")) {
+            System.out.print("This document is currently AVAILABLE. Do you want to disable it? (Y/N): ");
+            choice = sc.nextLine();
 
-            } else if (currentStatus.equalsIgnoreCase("Disabled")) {
-                System.out.print("This document is currently DISABLED. Do you want to enable it? (Y/N): ");
-                String choicee = sc.nextLine();
-
-                if (choicee.equalsIgnoreCase("Y")) {
-                    PreparedStatement enableStmt = conn.prepareStatement(
-                            "UPDATE tbl_doc SET d_status = 'Available' WHERE d_id = ?");
-                    enableStmt.setInt(1, docId);
-                    enableStmt.executeUpdate();
-                    enableStmt.close();
-                    System.out.println("Document has been ENABLED (set to Available).");
-                } else {
-                    System.out.println("Action cancelled.");
-                }
-
+            if (choice.equalsIgnoreCase("Y")) {
+                newStatus = "Disabled";
             } else {
-                System.out.println("❌ Unknown status – cannot modify.");
+                System.out.println("⚙️ Action cancelled.");
+                return;
+            }
+        } else if (currentStatus.equalsIgnoreCase("Disabled")) {
+            System.out.print("This document is currently DISABLED. Do you want to enable it? (Y/N): ");
+            choice = sc.nextLine();
+
+            if (choice.equalsIgnoreCase("Y")) {
+                newStatus = "Available";
+            } else {
+                System.out.println("⚙️ Action cancelled.");
+                return;
+            }
+        } else {
+            System.out.println("❌ Unknown status – cannot modify.");
+            return;
+        }
+
+        // STEP 5: Update status
+        try (Connection conn = connectDB();
+             PreparedStatement updateStmt = conn.prepareStatement(
+                     "UPDATE tbl_doc SET d_status = ? WHERE d_id = ?")) {
+            
+            updateStmt.setString(1, newStatus);
+            updateStmt.setInt(2, docId);
+            updateStmt.executeUpdate();
+
+            if (newStatus.equals("Disabled")) {
+                System.out.println("✅ Document has been DISABLED.");
+            } else {
+                System.out.println("✅ Document has been ENABLED (set to Available).");
             }
 
         } catch (SQLException e) {
-            System.out.println("Error modifying document: " + e.getMessage());
+            System.out.println("❌ Error modifying document: " + e.getMessage());
         }
     }
 

@@ -42,89 +42,90 @@ public class main {
     }
 
     private static void handleLogin(Scanner sc) {
-        boolean loggedIn = false;
+    boolean loggedIn = false;
+    config db = new config();  // IMPORTANT
 
-        while (!loggedIn) {
-            System.out.print("Enter Username (u_name): ");
-            String username = sc.nextLine();
-            System.out.print("Enter Password: ");
-            String password = sc.nextLine();
+    while (!loggedIn) {
+        System.out.print("Enter Username (u_name): ");
+        String username = sc.nextLine();
+        System.out.print("Enter Password: ");
+        String password = sc.nextLine();
 
-            try (Connection conn = connectDB()) {
-                PreparedStatement state = conn.prepareStatement(
-                        "SELECT u_id, u_status, u_role, u_password, u_fullname FROM tbl_user WHERE u_name = ?"
-                );
-                state.setString(1, username);
+        try (Connection conn = connectDB()) {
+            PreparedStatement state = conn.prepareStatement(
+                "SELECT u_id, u_status, u_role, u_password, u_fullname FROM tbl_user WHERE u_name = ?"
+            );
+            state.setString(1, username);
 
-                try (ResultSet rs = state.executeQuery()) {
-                    if (rs.next()) {
-                        dbPassword = rs.getString("u_password");
-                        role = rs.getString("u_role");
-                        status = rs.getString("u_status");
-                        fullName = rs.getString("u_fullname");
-                        userId = rs.getInt("u_id");
-                    }
-                    rs.close();
+            try (ResultSet rs = state.executeQuery()) {
 
-                    if (password.equals(dbPassword)) {
-                        if (status.equalsIgnoreCase("Approved")) {
-                            System.out.println("Login successful! Welcome, " + fullName);
-
-                            if (role.equalsIgnoreCase("Official") || role.equalsIgnoreCase("Admin")) {
-                                Officials officials = new Officials();
-                                officials.showAdminMenu(sc);
-                            } else {
-                                Residents residents = new Residents();
-                                residents.showResidentMenu(sc, userId);
-                            }
-                            loggedIn = true;
-                        } else if (status.equalsIgnoreCase("Pending")) {
-                            System.out.println("Your account is still pending approval.");
-                            loggedIn = true;
-                        } else {
-                            System.out.println("Your account has been disabled.");
-                            loggedIn = true;
-                        }
-                    } else {
-                        System.out.println("Incorrect password! Please try again...");
-                    }
+                if (!rs.next()) {
+                    System.out.println("❌ Username not found!");
+                    continue; // restart login loop
                 }
-            } catch (SQLException e) {
-                System.out.println("Error: " + e.getMessage());
+
+                // Username exists → load details
+                dbPassword = rs.getString("u_password");
+                role = rs.getString("u_role");
+                status = rs.getString("u_status");
+                fullName = rs.getString("u_fullname");
+                userId = rs.getInt("u_id");
             }
 
-            if (!loggedIn) {
+            // Now compare password
+            if (!db.verifyPassword(password, dbPassword)) {
+                System.out.println("❌ Incorrect password!");
+                continue;
+            }
+
+            // Password is correct → check status
+            if (status.equalsIgnoreCase("Pending")) {
+                System.out.println("⏳ Your account is still pending approval.");
+                loggedIn = true;
+
+            } else if (status.equalsIgnoreCase("Disabled")) {
+                System.out.println("❌ Your account has been disabled.");
+                loggedIn = true;
+
+            } else {
+                System.out.println("✅ Login successful! Welcome, " + fullName);
+
+                if (role.equalsIgnoreCase("Official") || role.equalsIgnoreCase("Admin")) {
+                    new Officials().showAdminMenu(sc);
+                } else {
+                    new Residents().showResidentMenu(sc, userId);
+                }
+                loggedIn = true;
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Error: " + e.getMessage());
+        }
+
+
                 System.out.println();
             }
         }
-    }
+
+
 
     private static void handleRegistration(Scanner sc) {
-        String newUser;
-        String newPass;
-        String newContact;
-        String newFullName;
-        String newRole;
+        String newUser, newPass, newContact, newFullName, newRole;
 
         // Check username uniqueness
         while (true) {
             System.out.print("Enter Username (u_name): ");
             newUser = sc.nextLine();
 
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkStmt = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_name = ?"
-                );
+            try (Connection conn = connectDB();
+                 PreparedStatement checkStmt = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_name = ?")) {
+
                 checkStmt.setString(1, newUser);
                 ResultSet rs = checkStmt.executeQuery();
 
-                boolean exists = false;
-                if (rs.next() && rs.getInt(1) > 0) {
-                    exists = true;
-                }
-
+                boolean exists = rs.next() && rs.getInt(1) > 0;
                 rs.close();
-                checkStmt.close();
 
                 if (exists) {
                     System.out.println("❌ Username already exists! Please try another one.\n");
@@ -138,14 +139,44 @@ public class main {
             }
         }
 
-        // Enter Full Name
-        System.out.print("Enter Full Name: ");
-        newFullName = sc.nextLine();
+        // Validate Full Name (must not exist already)
+while (true) {
+    System.out.print("Enter Full Name: ");
+    newFullName = sc.nextLine().trim();
+
+    if (newFullName.isEmpty()) {
+        System.out.println("❌ Full name cannot be empty.\n");
+        continue;
+    }
+
+    try (Connection conn = connectDB();
+         PreparedStatement checkFullName = conn.prepareStatement(
+                 "SELECT COUNT(*) FROM tbl_user WHERE LOWER(TRIM(u_fullname)) = LOWER(TRIM(?))"
+         )) {
+
+        checkFullName.setString(1, newFullName);
+        ResultSet rsFull = checkFullName.executeQuery();
+
+        boolean exists = rsFull.next() && rsFull.getInt(1) > 0;
+        rsFull.close();
+
+        if (exists) {
+            System.out.println("❌ Full Name already exists! Please enter a different full name.\n");
+            continue; // LOOP BACK
+        }
+
+        break; // VALID → EXIT LOOP
+
+    } catch (SQLException e) {
+        System.out.println("❌ Error checking full name: " + e.getMessage());
+        continue;
+    }
+}
+
 
         // Enter Password
         System.out.print("Enter Password: ");
         newPass = sc.nextLine();
-
         String hashedPassword = db.hashPassword(newPass);
 
         // Validate Contact Number
@@ -158,31 +189,26 @@ public class main {
                 continue;
             }
 
-            try (Connection conn = connectDB()) {
-                PreparedStatement checkContact = conn.prepareStatement(
-                        "SELECT COUNT(*) FROM tbl_user WHERE u_contact = ?"
-                );
+            try (Connection conn = connectDB();
+                 PreparedStatement checkContact = conn.prepareStatement(
+                         "SELECT COUNT(*) FROM tbl_user WHERE u_contact = ?")) {
+
                 checkContact.setString(1, newContact);
                 ResultSet rsContact = checkContact.executeQuery();
 
-                boolean contactExists = false;
-                if (rsContact.next() && rsContact.getInt(1) > 0) {
-                    contactExists = true;
-                }
-
+                boolean contactExists = rsContact.next() && rsContact.getInt(1) > 0;
                 rsContact.close();
-                checkContact.close();
 
                 if (contactExists) {
                     System.out.println("❌ Contact number already exists! Please try another.\n");
                     continue;
                 }
+                break;
+
             } catch (SQLException e) {
                 System.out.println("❌ Error checking contact: " + e.getMessage());
                 continue;
             }
-
-            break;
         }
 
         // Ask for role (Official or Resident)
@@ -198,15 +224,24 @@ public class main {
             }
         }
 
-        // Insert new record safely
-        try {
-            db.updateRecord(
-                    "INSERT INTO tbl_user (u_name, u_fullname, u_password, u_status, u_contact, u_role) VALUES (?, ?, ?, 'Pending', ?, ?)",
-                    newUser, newFullName, hashedPassword, newContact, newRole
-            );
+        // Insert new record - DO NOT RELY ON DEFAULT, EXPLICITLY SET u_status TO "Pending"
+        String insertSQL = "INSERT INTO tbl_user (u_name, u_fullname, u_password, u_contact, u_role, u_status) VALUES (?, ?, ?, ?, ?, ?)";
+
+        try (Connection conn = connectDB();
+             PreparedStatement insertStmt = conn.prepareStatement(insertSQL)) {
+
+            insertStmt.setString(1, newUser);
+            insertStmt.setString(2, newFullName);
+            insertStmt.setString(3, hashedPassword);
+            insertStmt.setString(4, newContact);
+            insertStmt.setString(5, newRole);         // u_role = "Official" or "Resident"
+            insertStmt.setString(6, "Pending");        // u_status = "Pending" ← 100% GUARANTEED
+
+            insertStmt.executeUpdate();
 
             System.out.println("✅ Registration successful! Please wait for approval.");
-        } catch (Exception e) {
+
+        } catch (SQLException e) {
             System.out.println("❌ Error during registration: " + e.getMessage());
         }
     }

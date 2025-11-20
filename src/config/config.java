@@ -191,19 +191,25 @@ public static String hashPassword(String password) {
     try {
         java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
         byte[] hashedBytes = md.digest(password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        
-        // Convert byte array to hex string
+
         StringBuilder hexString = new StringBuilder();
         for (byte b : hashedBytes) {
-            String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) hexString.append('0');
-            hexString.append(hex);
+            // Convert each byte to a 2-digit hex string
+            hexString.append(String.format("%02x", b));
         }
+
         return hexString.toString();
+
     } catch (java.security.NoSuchAlgorithmException e) {
         System.out.println("Error hashing password: " + e.getMessage());
         return null;
     }
 }
-    
+
+
+    public boolean verifyPassword(String enteredPassword, String storedHash) {
+    String hashedInput = hashPassword(enteredPassword); // hash the input
+    return hashedInput.equals(storedHash);              // compare hashes
+    }
+
 }
